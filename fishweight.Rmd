@@ -1,0 +1,357 @@
+---
+title: "Fish Weight Prediction"
+author: "Atul Verma"
+date: "2022-09-30"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+## Libraries
+```{r}
+library(dplyr)
+library(ggplot2)
+library(corrplot)
+library(lmtest)
+library(car)
+```
+
+
+## Importing The Dataset
+```{r}
+fish = read.csv("C:/Users/verma/Desktop/Internship project/project/fish wieght/Fish.csv")
+View(fish)
+head(fish)
+str(fish)
+dim(fish)
+```
+
+### Describtion of each column names
+
+  * Species: species measured, there are seven in total.
+    1.) Bream  2.) Parkki 3.) Perch 4.) Pike
+    5.) Roach  6.) Smelt  7.) Whitefish
+  * Weight: Fish weight in grams.
+  * Length1: vertical length in cm.
+  * Length2: diagonal length in cm.
+  * Length3: cross length in cm.
+  * Height: Height in cm.
+  * Width: diagonal width in cm.
+
+
+
+## Checking for Missing Variables and cleaning data (By see the summary of data)
+
+```{r}
+summary(fish)
+
+
+cat("Are there any missing value in the dataset?" ,any(is.na(fish)))
+
+
+```
+
+The dataset doesn't have any missing value, and there are no negative values. Our data is already fairly clean!
+
+##### species should be factor here
+
+```{r}
+fish$Species = factor(fish$Species)
+summary(fish)
+
+```
+
+As you can see, all the variables are well specified. Species is the only Factor variable, while the other six are continuous. Later, Weight is going to be our dependent variable, and we are going to predict it's value using the other features as indipendent variables.
+
+
+but at least one fish has weight zero which we need to fix:
+
+#### Finding that row index which has zero weight
+```{r}
+which(fish$Weight == 0)
+
+```
+
+#### Extracting that row index which has zero weight
+```{r}
+weight0 = fish[41,]
+weight0
+
+```
+
+The fish at row 41 weights 0 g. So, to avoid errors when using the logarithmic transformation, it's better to drop this observation.
+
+```{r}
+fish <- fish%>%
+  filter(Weight>0)
+
+summary(fish)
+
+```
+Now minimum weight is not 0, and it is changed.
+
+## Finding Outlier Detection
+```{r}
+g = ggplot(data = fish)
+
+g + geom_boxplot(aes(y = Weight,  ),color = "black", fill = "purple") + theme_classic() 
+
+g + geom_boxplot(aes(y = Length1),color = "red", fill = "green")+ theme_classic()
+
+g + geom_boxplot(aes(y = Length2),color = "black", fill = "purple") + theme_classic()
+
+g + geom_boxplot(aes(y = Length3),color = "black", fill = "brown" ) + theme_classic()
+
+g+geom_boxplot(aes(y = Height),color = "black", fill = "blue") + theme_classic()
+  
+g+geom_boxplot(aes(y = Width),color = "black", fill = "orange") + theme_classic()
+
+  
+colnames(fish)
+```
+## Removing Outliers
+
+```{r}
+fish = fish%>%
+  filter(Weight<1500)
+```
+Now checking outlier value:-
+   Outliers increase the variability in your data, which decreases statistical power. Consequently, excluding outliers can cause your results to become statistically significant.
+
+```{r}
+g = ggplot(data = fish)
+
+g + geom_boxplot(aes(y = Weight), color = "black", fill = "purple") + theme_classic()
+
+g + geom_boxplot(aes(y = Length1),color = "red", fill = "green") +  theme_classic()
+
+g + geom_boxplot(aes(y = Length2),color = "black",, fill = "purple") +  theme_classic()
+
+g + geom_boxplot(aes(y = Length3),color = "black", fill = "brown" ) +  theme_classic()
+
+g+geom_boxplot(aes(y = Height),color = "black", fill = "blue") +  theme_classic()
+  
+g+geom_boxplot(aes(y = Width),color = "black", fill = "orange") +  theme_classic()
+
+
+```
+
+
+### **Interpretation**:-  we just remove outliers of weight but outliers of length also gone which mean data which generating outliers in weight is same which genrating outliers in Length1, Length2, length3
+
+
+Now we can see there are no outliers in the above boxplots. We can move forward
+
+## Check the correlation
+
+```{r}
+corr = cor(fish %>% select(-c(Species)));corr
+corrplot(corr, method = "circle",diag = F, type = "lower")
+corrplot(corr, method = "number", diag = T, type = "lower")
+```
+
+
+### **Interpretation**:- By seeing the correlation plot we can define Length1, Length2, Length3 are highly positive correlated to Weight that is good sign but they are also highly correlated with other variable.
+### If the correlation is too high it can lead to Multicollinearity in regression modeling. Which should be avoided by eliminate one of those variables that highly correlated to each others. What impact does the strong correlation between the two variables have on the regression analysis? we’ll know the answer later by keep all of the variables.
+
+# Modeling
+
+## Train-Test Split
+
+Before the phase of model creation, we need to split our dataset into Train and Test dataset for more accurate model. We will use train dataset to train our model, while the Test dataset will be used as a comparison whether our model can predict new data that has not been use.
+
+We will split the Train and test dataset with 70 : 30 ratio.
+
+```{r}
+fish_reg = (fish %>% select(-c(Species)))
+set.seed(123)
+samplesize = round(0.8 * nrow(fish_reg), 0)
+index = sample(seq_len(nrow(fish_reg)), size = samplesize)
+data_train = fish_reg[index, ]
+data_test = fish_reg[-index, ]
+```
+
+## Linear Regression
+
+```{r}
+
+fish_lm = lm(Weight ~., data = data_train)
+summary(fish_lm)
+
+```
+
+
+Let’s take a look on Pr(>|t|) column. We will take significance level of 0.05. It means if the value Pr(>|t|) is below 0.05, than we can assume that the variable has significant effect toward the model. 
+       The summary of fish_lm shown only one variable (Height) has significant effect toward our model. So with every increased value of one cm in Height will contribute to 38.410 increase in fish Weight.
+       
+## Step-wise Regression
+
+Stepwise regression is an appropriate analysis when you have many variables and you're interested in identifying a useful subset of the predictors.
+
+```{r}
+fish_lm_step = step(fish_lm, direction = "backward")
+
+summary(fish_lm_step)
+
+```
+
+
+This step-wise regression method will produce an optimum formula based on the lowest AIC value. The Akaike information criterion (AIC) is a mathematical method for evaluating how well a model fits the data it was generated from.
+
+We can see that the step wise regression eliminates the Length2 and Width variables to produce the smallest AIC. The selected variables are Length1, Length2, Height. Length1 and Height have a significant effect to our model fish_lm_step (Pr(>|t|) is below 0.05). We can check the Adjusted R-Squared value from fish_lm and fish_lm_step. The first model with complete variables has adjusted R-squared of 0.8988 or fish_lm model can explain 89.88% of variance in Fish Weight (independent variable). While the step-wise regression has adjusted R-squared of 0.8988. There’s no big difference with fish_lm and fish_lm_step.
+
+
+ Weight = -418.85+64.606*(Length1)-45.766(Length3)+39.01(Height)
+
+       
+       
+# **Assumptions**:- There are four assumptions associated with a linear regression model:-
+#### 1. Linearity
+#### 2. Normality of residuals
+#### 3. Heterocedasticity(Non-constant variance of error terms)
+#### 4. Multicollinearity
+
+## 1. Linearity
+
+
+```{r}
+plot(fish_lm_step, 1)
+```
+
+The residual and fit value that we have tend to be quadratic curve. This indicates that the linearity assumption is violated.
+
+## 2. Normality of residuals
+
+The residual and fit value that we have tend to be quadratic curve. This indicates that the linearity assumption is violated.QQ plot of residuals can be used to check the normality assumption.
+
+```{r}
+plot(fish_lm_step,2)
+
+```
+
+
+### **Interpretation**:- From the QQ plot, not all of the data follow a straight line. so we can assume that the residual didnt follom the normality assumption. To make sure, we can check by formal test using Shapiro test.
+Null hypothesis is residuals follow the normal distribution
+vs Alternate hypothesis is residuals not follow the normal distribution.
+
+```{r}
+shapiro.test(fish_lm_step$residuals)
+
+```
+
+
+### **Interpretation**:- The test rejects the hypothesis of normality when the p-value is less than or equal to 0.05. The null hypothesis is that the residuals follow normal distribution. It means that that our hypothesis is rejected. So or residuals are not following the normal distribution.
+
+## 3. Heterocedasticity(Non-constant variance of error terms)
+
+The residuals are assumed to have a constant variance.
+
+```{r}
+plot(fish_lm_step, 3)
+```
+
+
+### **Interpretation**:- This plot shows if residuals are not spread equally along the ranges of predictors. It means our residuals doesnt have constant variance. To make sure, We can check with Breusch-Pagan test.
+Here Null Hypothesis is there is no heterocesdasticity.
+
+```{r}
+bptest(fish_lm_step)
+
+```
+
+
+### **Interpretation**:- we reject the null hypothesis because BP test has a high value and low p(<0.05) value and conclude that this regression model voiletes the homoscedasticity assumption. We can conclude that heterocesdasticity is present in our model.
+
+
+## 4. Multicollinearity
+
+High intercorrelations between two or more independent variables in a multiple regression model are referred to as multicollinearity. By measuring the varianec inflation factor, we can determine the multicollinearity (VIF). When VIF <10, there is no multicollinearity.
+
+```{r}
+
+
+vif(fish_lm_step)
+
+```
+
+
+### **Interpretation**- when we do correlation checking, we have 3 (Length1, Length2, Length3) variables that have a high correlation to each other. If the correlation is too high it can lead to Multicollinearity in regression modeling.  But it still have multicollinearity in our model. So we have to eliminate two Length variable (Length1 and Length3, Length1 and Length2, Length2 and Length3).
+
+
+## Model Improvement
+
+All of the linear regression assumptions are not met by our final model. We may correct these by using sqrt to convert the data and removing the high-correlation variable to eliminate multicollinearity. Length1 and Height are the final independent predictors that I have chosen.
+
+```{r}
+fish_imprv <- fish  %>% 
+  mutate_if(~is.numeric(.), ~sqrt(.)) %>% 
+  select(Weight,Length1, Height)
+set.seed(123)
+data_train2 <- fish_imprv[index, ]
+data_test2 <- fish_imprv[-index, ]
+```
+
+## Regression New Model
+
+```{r}
+fish_lm_imprv <- lm(Weight ~ Length1+Height, data = data_train2)
+summary(fish_lm_imprv)
+```
+
+
+## **Assumptions New Model**
+
+## 1. Linearity
+
+```{r}
+
+plot(fish_lm_imprv,1)
+
+```
+
+
+There is still square pattern in our residual plot.
+
+## 2. Normality of residuals
+
+```{r}
+
+shapiro.test(fish_lm_imprv$residuals)
+```
+p-value < 0.05, it means that residual isnt normally distributed.
+
+## 3. Heterocedasticity (Non-constant variance of error terms)
+
+```{r}
+
+bptest(fish_lm_imprv)
+```
+
+
+p-value > 0.05, it means that heterocesdasticity is not present.
+
+## 4. Multicollinearity
+
+```{r}
+
+vif(fish_lm_imprv)
+
+
+View(fish)
+View(fish_imprv)
+```
+
+
+there’s no Multicollinearity because all of VIF<10,
+
+
+## **CONCLUSION**
+
+#### Fish length1 and height are two factors that influence weight. Length2 and Length3 must be taken out of the equation because of their strong association. Additionally, data must be transformed to sqrt in order to satisfy the requirements of linear regression. The final linear regression model has an adjusted R-squared of 0.947. It implies that the model outperforms the two preceding models. Fishermen must lengthen and heighten each fish individually in order to raise the weight of each fish for commercially beneficial purposes.
+
+
+
+
+
+
